@@ -1,6 +1,5 @@
-import os
 import logging
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # === ВСТАВЬ СВОЙ ТОКЕН СЮДА ===
