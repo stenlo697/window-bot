@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 TOKEN = "8651110604:AAHJ0RvsibAsBXUnxP_j_1r3ujnMXrPlKsA"
 GROQ_API_KEY = "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"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-ADMIN_ID = 435999393
+ADMIN_ID = 887859918
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
