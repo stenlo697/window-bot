@@ -1,11 +1,13 @@
 import logging
 import httpx
+from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 TOKEN = "8651110604:AAHJ0RvsibAsBXUnxP_j_1r3ujnMXrPlKsA"
 GROQ_API_KEY = "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"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+ADMIN_ID = 435999393
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -42,10 +44,28 @@ QUICK_REPLIES = [
 ]
 
 user_histories = {}
+stats = {"users": set(), "messages": 0, "last_time": None}
 
 
 def get_keyboard():
     return ReplyKeyboardMarkup(QUICK_REPLIES, resize_keyboard=True)
+
+
+async def notify_admin(context, user, text, answer):
+    name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Без имени"
+    username = f"@{user.username}" if user.username else "нет username"
+    time_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    msg = (
+        f"👤 *{name}* ({username})\n"
+        f"🆔 `{user.id}`\n"
+        f"🕐 {time_str}\n\n"
+        f"✉️ *Клиент:* {text}\n\n"
+        f"🤖 *Бот:* {answer}"
+    )
+    try:
+        await context.bot.send_message(chat_id=ADMIN_ID, text=msg, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Admin notify error: {e}")
 
 
 async def ask_groq(user_id: int, user_message: str) -> str:
@@ -79,31 +99,63 @@ async def ask_groq(user_id: int, user_message: str) -> str:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_histories[user_id] = []
+    user = update.effective_user
+    user_histories[user.id] = []
+    stats["users"].add(user.id)
+    stats["last_time"] = datetime.now()
     await update.message.reply_text(WELCOME, parse_mode="Markdown", reply_markup=get_keyboard())
+
+    name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Без имени"
+    username = f"@{user.username}" if user.username else "нет username"
+    try:
+        await context.bot.send_message(
+            chat_id=ADMIN_ID,
+            text=f"🆕 Новый пользователь запустил бота\n👤 *{name}* ({username})\n🆔 `{user.id}`",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        logger.error(f"Admin notify error: {e}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user = update.effective_user
     text = update.message.text or ""
     clean = text.replace("💰","").replace("🤖","").replace("✅","").replace("📅","") \
                 .replace("🪟","").replace("🔒","").replace("🚗","").replace("📆","").strip()
 
+    stats["users"].add(user.id)
+    stats["messages"] += 1
+    stats["last_time"] = datetime.now()
+
     try:
-        answer = await ask_groq(user_id, clean)
+        answer = await ask_groq(user.id, clean)
     except Exception as e:
         logger.error(f"Groq error: {e}")
         answer = "Что-то пошло не так 😔 Попробуйте написать ещё раз или выберите вопрос из меню."
 
     await update.message.reply_text(answer, reply_markup=get_keyboard())
+    await notify_admin(context, user, clean, answer)
+
+
+async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    last = stats["last_time"].strftime("%d.%m.%Y %H:%M") if stats["last_time"] else "нет данных"
+    msg = (
+        f"📊 *Статистика бота:*\n\n"
+        f"👤 Уникальных пользователей: {len(stats['users'])}\n"
+        f"💬 Всего сообщений: {stats['messages']}\n"
+        f"🕐 Последнее обращение: {last}"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("Бот запущен с Groq AI...")
+    logger.info("Бот запущен с Groq AI и уведомлениями...")
     app.run_polling()
 
 
