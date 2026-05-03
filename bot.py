@@ -1,57 +1,33 @@
 import logging
+import httpx
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-# === ВСТАВЬ СВОЙ ТОКЕН СЮДА ===
 TOKEN = "8651110604:AAHJ0RvsibAsBXUnxP_j_1r3ujnMXrPlKsA"
+GROQ_API_KEY = "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"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# База знаний
-KB = [
-    {
-        "keys": ["цен", "стоит", "стоимост", "сколько", "тариф", "прайс"],
-        "answer": "💰 *Стоимость аренды:*\n\n• 25 BYN в сутки\n• Для новых клиентов — *15 BYN* (акция)\n\nОплата при получении."
-    },
-    {
-        "keys": ["работает", "принцип", "как он", "механизм", "устроен", "что делает"],
-        "answer": "🤖 *Как работает робот:*\n\nРобот крепится к стеклу на вакуумных присосках и самостоятельно ездит по окну, протирая его.\n\nВы просто запускаете — дальше всё автоматически. Одно окно занимает около 5–10 минут."
-    },
-    {
-        "keys": ["безопасн", "упадёт", "упадет", "надёжн", "присоск", "датчик"],
-        "answer": "✅ *Безопасность:*\n\nРобот оснащён датчиками края — он не упадёт с окна. Если присоска начинает слабеть, устройство сигнализирует и останавливается.\n\nТысячи людей используют такие роботы без происшествий."
-    },
-    {
-        "keys": ["забронир", "заказать", "записаться", "оформить", "получить", "взять"],
-        "answer": "📅 *Как забронировать:*\n\n1. Напишите нам удобное время\n2. Договариваемся о встрече\n3. При получении показываем как пользоваться (~10 мин)\n\nПишите прямо сюда — ответим быстро!"
-    },
-    {
-        "keys": ["какие окна", "подходит", "подойдёт", "стеклопакет", "балкон", "москит", "сетк"],
-        "answer": "🪟 *Подходящие окна:*\n\n✅ Квартирные стеклопакеты\n✅ Балконные окна\n✅ Панорамные окна\n\n❌ Структурированное (рифлёное) стекло\n❌ Окна с москитной сеткой (сетку нужно снять перед запуском)"
-    },
-    {
-        "keys": ["залог", "депозит", "страхов"],
-        "answer": "🔒 *Залог:*\n\nЗалог — *50 BYN*\n\nВозвращается сразу после возврата робота в целости. Это стандартная защита оборудования."
-    },
-    {
-        "keys": ["доставк", "привезут", "самовывоз", "адрес"],
-        "answer": "🚗 *Доставка:*\n\n• Самовывоз — бесплатно\n• Доставка по городу — 5 BYN\n\nАдрес уточняется при бронировании."
-    },
-    {
-        "keys": ["сколько дней", "дней можно", "срок", "минимум", "максимум", "на неделю", "период"],
-        "answer": "📆 *Сроки аренды:*\n\n• Минимум — 1 сутки\n• Максимум — 7 суток\n\nНужно дольше? Напишите — обсудим индивидуально."
-    },
-    {
-        "keys": ["инструкци", "научит", "покажет", "сложно", "просто", "разберусь"],
-        "answer": "📱 *Инструкция:*\n\nВсё очень просто! При получении показываем как запустить — занимает около 10 минут.\n\nТакже есть видео-инструкция."
-    },
-]
+SYSTEM_PROMPT = """Ты — вежливый помощник по аренде робота-мойщика окон. Отвечай коротко (2-4 предложения), по делу, дружелюбно. Пиши на русском языке.
 
-FALLBACK = (
-    "Хороший вопрос! 😊 Чтобы ответить точнее — уточните, пожалуйста, что именно вас интересует, "
-    "или выберите один из вариантов ниже."
-)
+Информация о сервисе:
+- Стоимость аренды: 25 BYN в сутки. Для новых клиентов — 15 BYN (акция)
+- Робот сам ездит по стеклу, моет и не падает — держится на вакуумных присосках
+- Подходит для: обычных квартирных окон, балконных окон, стеклопакетов
+- Не подходит: структурированное (рифлёное) стекло, окна где нельзя снять москитную сетку
+- Безопасность: робот оснащён датчиками края, сигнализирует если присоска слабеет
+- Залог: 50 BYN (возвращается после возврата в целости)
+- Как забронировать: написать сюда, договориться о времени встречи, покажем как пользоваться — 10 минут
+- Доставка: самовывоз бесплатно, доставка по городу 5 BYN
+- Время аренды: от 1 до 7 суток
+- Если клиент хочет связаться или перезвонить — скажи что напишите удобное время и перезвоним
+- Если клиент торгуется — напомни про акцию 15 BYN для новых клиентов, скажи что это лучшая цена
+- Если клиент говорит спасибо — ответь тепло и коротко
+- Если клиент хочет заказать — попроси написать удобное время для встречи
+
+Если вопрос совсем не по теме — мягко переведи разговор обратно к аренде."""
 
 WELCOME = (
     "Привет! 👋 Я помогу узнать всё про аренду *робота-мойщика окон*.\n\n"
@@ -65,46 +41,69 @@ QUICK_REPLIES = [
     ["🚗 Доставка?", "📆 На сколько дней?"],
 ]
 
+user_histories = {}
+
 
 def get_keyboard():
     return ReplyKeyboardMarkup(QUICK_REPLIES, resize_keyboard=True)
 
 
-def find_answer(text: str) -> str:
-    t = text.lower()
-    for entry in KB:
-        if any(k in t for k in entry["keys"]):
-            return entry["answer"]
-    return FALLBACK
+async def ask_groq(user_id: int, user_message: str) -> str:
+    if user_id not in user_histories:
+        user_histories[user_id] = []
+
+    user_histories[user_id].append({"role": "user", "content": user_message})
+
+    if len(user_histories[user_id]) > 20:
+        user_histories[user_id] = user_histories[user_id][-20:]
+
+    payload = {
+        "model": "llama-3.1-8b-instant",
+        "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + user_histories[user_id],
+        "max_tokens": 300,
+        "temperature": 0.7,
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            GROQ_URL,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=15.0
+        )
+        data = response.json()
+        reply = data["choices"][0]["message"]["content"].strip()
+
+    user_histories[user_id].append({"role": "assistant", "content": reply})
+    return reply
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        WELCOME,
-        parse_mode="Markdown",
-        reply_markup=get_keyboard()
-    )
+    user_id = update.effective_user.id
+    user_histories[user_id] = []
+    await update.message.reply_text(WELCOME, parse_mode="Markdown", reply_markup=get_keyboard())
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
     text = update.message.text or ""
-    # Убираем эмодзи из кнопок для поиска
-    clean = text.replace("💰", "").replace("🤖", "").replace("✅", "").replace("📅", "") \
-                .replace("🪟", "").replace("🔒", "").replace("🚗", "").replace("📆", "").strip()
+    clean = text.replace("💰","").replace("🤖","").replace("✅","").replace("📅","") \
+                .replace("🪟","").replace("🔒","").replace("🚗","").replace("📆","").strip()
 
-    answer = find_answer(clean)
-    await update.message.reply_text(
-        answer,
-        parse_mode="Markdown",
-        reply_markup=get_keyboard()
-    )
+    try:
+        answer = await ask_groq(user_id, clean)
+    except Exception as e:
+        logger.error(f"Groq error: {e}")
+        answer = "Что-то пошло не так 😔 Попробуйте написать ещё раз или выберите вопрос из меню."
+
+    await update.message.reply_text(answer, reply_markup=get_keyboard())
 
 
 def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    logger.info("Бот запущен...")
+    logger.info("Бот запущен с Groq AI...")
     app.run_polling()
 
 
